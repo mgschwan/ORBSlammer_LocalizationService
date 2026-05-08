@@ -704,11 +704,12 @@ void KeyFrameDatabase::DetectNBestCandidates(KeyFrame *pKF, vector<KeyFrame*> &v
     vpLoopCand.reserve(nNumCandidates);
     vpMergeCand.reserve(nNumCandidates);
     set<KeyFrame*> spAlreadyAddedKF;
-    int i = 0;
     list<pair<float,KeyFrame*> >::iterator it=lAccScoreAndMatch.begin();
-    while(i < lAccScoreAndMatch.size() && (vpLoopCand.size() < nNumCandidates || vpMergeCand.size() < nNumCandidates))
+    while(it != lAccScoreAndMatch.end() && (vpLoopCand.size() < nNumCandidates || vpMergeCand.size() < nNumCandidates))
     {
         KeyFrame* pKFi = it->second;
+        ++it;  // always advance — prevents infinite loop when pKFi is bad
+
         if(pKFi->isBad())
             continue;
 
@@ -724,8 +725,6 @@ void KeyFrameDatabase::DetectNBestCandidates(KeyFrame *pKF, vector<KeyFrame*> &v
             }
             spAlreadyAddedKF.insert(pKFi);
         }
-        i++;
-        it++;
     }
 }
 

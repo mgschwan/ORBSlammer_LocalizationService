@@ -29,6 +29,7 @@ public:
               PoseState&          pose,
               CalibrationManager& calib,
               std::atomic<bool>&  localizationMode,
+              std::atomic<bool>&  allowMapCreation,
               long unsigned int   initialMapId,
               std::string         staticFileRoot = kStaticFileRoot);
 
@@ -102,6 +103,7 @@ private:
     PoseState&          pose_;
     CalibrationManager& calib_;
     std::atomic<bool>&  localizationMode_;
+    std::atomic<bool>&  allowMapCreation_;
     long unsigned int   initialMapId_;
     std::string         staticFileRoot_;
     int                 serverFd_{-1};

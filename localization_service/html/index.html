@@ -34,6 +34,7 @@
         </div>
         <div style="margin-top:20px;">
             <button class="btn" style="background:#ffc107;color:#333;" onclick="sendCommand('/newmap')">Create New Map</button>
+            <button id="btn-allow-newmaps" class="btn" onclick="toggleMapCreation()">Allow New Maps: ?</button>
         </div>
         <hr>
         <h3>Saved Calibrations</h3>
@@ -61,6 +62,7 @@
 
     <script>
         let isPaused = false;
+        let allowMapCreation = true;
 
         async function downloadAtlas() {
             document.getElementById('atlas-status').textContent = "Exporting atlas... please wait.";
@@ -145,6 +147,21 @@
                     btnPause.style.color = "white";
                 }
 
+                // Update Allow New Maps button
+                const btnAllow = document.getElementById('btn-allow-newmaps');
+                allowMapCreation = data.allowMapCreation;
+                if (allowMapCreation) {
+                    btnAllow.textContent = "Allow New Maps: ON";
+                    btnAllow.style.background = "#28a745";
+                    btnAllow.style.color = "white";
+                    btnAllow.style.borderColor = "#28a745";
+                } else {
+                    btnAllow.textContent = "Allow New Maps: OFF";
+                    btnAllow.style.background = "#dc3545";
+                    btnAllow.style.color = "white";
+                    btnAllow.style.borderColor = "#dc3545";
+                }
+
                 // Update Maps Table
                 let mapsHtml = '<table><tr><th>Map ID</th><th>KeyFrames</th><th>MapPoints</th><th>Action</th></tr>';
                 data.maps.forEach((map, idx) => {
@@ -177,6 +194,11 @@
             } catch (err) {
                 console.error('Error sending command:', err);
             }
+        }
+
+        function toggleMapCreation() {
+            const enable = !allowMapCreation;
+            sendCommand('/allow_new_maps?enable=' + (enable ? 'true' : 'false'));
         }
 
         function togglePause() {

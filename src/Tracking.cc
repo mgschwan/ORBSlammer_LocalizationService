@@ -43,7 +43,7 @@ namespace ORB_SLAM3
 
 Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Atlas *pAtlas, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor, Settings* settings, const string &_nameSeq):
     mState(NO_IMAGES_YET), mSensor(sensor), mTrackedFr(0), mbStep(false),
-    mbOnlyTracking(false), mbMapUpdated(false), mbVO(false), mpORBVocabulary(pVoc), mpKeyFrameDB(pKFDB),
+    mbOnlyTracking(false), mbAllowMapCreation(true), mbMapUpdated(false), mbVO(false), mpORBVocabulary(pVoc), mpKeyFrameDB(pKFDB),
     mbReadyToInitializate(false), mpSystem(pSys), mpViewer(NULL), bStepByStep(false),
     mpFrameDrawer(pFrameDrawer), mpMapDrawer(pMapDrawer), mpAtlas(pAtlas), mnLastRelocFrameId(0), time_recently_lost(5.0),
     mnInitialFrameId(0), mbCreatedMap(false), mnFirstFrameId(0), mpCamera2(nullptr), mpLastKeyFrame(static_cast<KeyFrame*>(NULL))
@@ -2023,13 +2023,19 @@ void Tracking::Track()
                 }
                 else if (mState == LOST)
                 {
-                    // MODIFIED: Do not automatically create a new map.
-                    // Instead, continuously try to relocalize in the current map.
-                    Verbose::PrintMess("State is LOST. Continuously trying to relocalize...", Verbose::VERBOSITY_NORMAL);
-                    bOK = Relocalization();
-                    if (!bOK) {
-                        mpFrameDrawer->Update(this);
-                        return;
+                    if (mbAllowMapCreation) {
+                        // Original upstream behaviour: create a new map segment.
+                        Verbose::PrintMess("State LOST — creating new map in Atlas...", Verbose::VERBOSITY_NORMAL);
+                        // Fall through; CreateMapInAtlas() is called below after the
+                        // mbOnlyTracking branch guard.
+                    } else {
+                        // Map-creation suppressed: keep retrying relocalization.
+                        Verbose::PrintMess("State is LOST. Continuously trying to relocalize...", Verbose::VERBOSITY_NORMAL);
+                        bOK = Relocalization();
+                        if (!bOK) {
+                            mpFrameDrawer->Update(this);
+                            return;
+                        }
                     }
                 }
             }
@@ -2279,9 +2285,10 @@ void Tracking::Track()
                     return;
                 }
 
-            // MODIFIED: Do not automatically create a new map
-            // cout << "Tracking:2290 - Creating new map in the atlas" << endl;
-            // CreateMapInAtlas();
+            if (mbAllowMapCreation) {
+                cout << "Tracking - Creating new map in the atlas" << endl;
+                CreateMapInAtlas();
+            }
 
             return;
         }

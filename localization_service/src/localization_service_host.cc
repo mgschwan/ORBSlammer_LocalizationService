@@ -45,6 +45,7 @@ static void handleStdinCommand(const std::string&  command,
                                 ORB_SLAM3::System&  slam,
                                 LifecycleFlags&     flags,
                                 std::atomic<bool>&  localizationMode,
+                                std::atomic<bool>&  allowMapCreation,
                                 long unsigned int   mapId)
 {
     if (command == "loc" || command == "localize") {
@@ -61,6 +62,14 @@ static void handleStdinCommand(const std::string&  command,
             slam.DeactivateLocalizationMode();
             std::cout << ">>> Switched to Mapping Mode <<<\n";
         }
+    } else if (command == "newmaps_on") {
+        allowMapCreation = true;
+        slam.SetAllowMapCreation(true);
+        std::cout << ">>> Map creation on tracking loss: ENABLED <<<\n";
+    } else if (command == "newmaps_off") {
+        allowMapCreation = false;
+        slam.SetAllowMapCreation(false);
+        std::cout << ">>> Map creation on tracking loss: DISABLED <<<\n";
     } else if (command == "pause") {
         flags.paused = true;
         std::cout << ">>> Paused Processing <<<\n";
@@ -126,6 +135,7 @@ int main(int argc, char** argv)
     LifecycleFlags     flags;
     PoseState          pose;
     std::atomic<bool>  localizationMode{false};
+    std::atomic<bool>  allowMapCreation{true};
 
     if (startInLocMode) {
         std::cout << "Activating localization mode\n";
@@ -133,6 +143,9 @@ int main(int argc, char** argv)
         slam.GetAtlas()->SwitchToMap(static_cast<unsigned int>(mapId));
         slam.ActivateLocalizationMode();
         slam.ForceRelocalization();
+        // In localization-only startup, suppress map creation by default.
+        allowMapCreation = false;
+        slam.SetAllowMapCreation(false);
     }
 
     // Install SIGINT handler
@@ -147,7 +160,7 @@ int main(int argc, char** argv)
 
     // Components
     CalibrationManager calib(slam);
-    WebServer          server(slam, flags, pose, calib, localizationMode, mapId, staticFileRoot);
+    WebServer          server(slam, flags, pose, calib, localizationMode, allowMapCreation, mapId, staticFileRoot);
 
     // Control thread: HTTP server + stdin commands
     std::thread controlThread([&]() {
@@ -168,7 +181,7 @@ int main(int argc, char** argv)
                     && FD_ISSET(STDIN_FILENO, &fds)) {
                     std::string cmd;
                     if (std::cin >> cmd)
-                        handleStdinCommand(cmd, slam, flags, localizationMode, mapId);
+                        handleStdinCommand(cmd, slam, flags, localizationMode, allowMapCreation, mapId);
                 }
             }
         });

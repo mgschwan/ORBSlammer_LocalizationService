@@ -28,6 +28,7 @@ WebServer::WebServer(ORB_SLAM3::System&  slam,
                      PoseState&          pose,
                      CalibrationManager& calib,
                      std::atomic<bool>&  localizationMode,
+                     std::atomic<bool>&  allowMapCreation,
                      long unsigned int   initialMapId,
                      std::string         staticFileRoot)
     : slam_(slam)
@@ -35,6 +36,7 @@ WebServer::WebServer(ORB_SLAM3::System&  slam,
     , pose_(pose)
     , calib_(calib)
     , localizationMode_(localizationMode)
+    , allowMapCreation_(allowMapCreation)
     , initialMapId_(initialMapId)
     , staticFileRoot_(std::move(staticFileRoot))
 {}
@@ -245,7 +247,7 @@ void WebServer::sseLoop(int fd)
         "Connection: keep-alive\r\n"
         "Access-Control-Allow-Origin: *\r\n\r\n";
 
-    if (write(fd, headers.c_str(), headers.size()) < 0) {
+    if (send(fd, headers.c_str(), headers.size(), MSG_NOSIGNAL) < 0) {
         close(fd);
         return;
     }
@@ -267,7 +269,7 @@ void WebServer::sseLoop(int fd)
             event = "data: {\"valid\":false}\n\n";
         }
 
-        if (write(fd, event.c_str(), event.size()) < 0)
+        if (send(fd, event.c_str(), event.size(), MSG_NOSIGNAL) < 0)
             break; // client disconnected
 
         usleep(kSseFrameDelayUs);
@@ -525,9 +527,10 @@ bool WebServer::routeControl(const std::string& req, std::string& response)
         if (pMap) currentMapId = pMap->GetId();
 
         std::string json = "{";
-        json += "\"localizationMode\":"  + std::string(localizationMode_ ? "true" : "false") + ",";
-        json += "\"paused\":"            + std::string(flags_.paused     ? "true" : "false") + ",";
-        json += "\"currentMapId\":"      + std::to_string(currentMapId)  + ",";
+        json += "\"localizationMode\":"  + std::string(localizationMode_   ? "true" : "false") + ",";
+        json += "\"allowMapCreation\":"  + std::string(allowMapCreation_   ? "true" : "false") + ",";
+        json += "\"paused\":"            + std::string(flags_.paused       ? "true" : "false") + ",";
+        json += "\"currentMapId\":"      + std::to_string(currentMapId)    + ",";
         json += "\"maps\":[";
         bool first = true;
         for (ORB_SLAM3::Map* m : slam_.GetAtlas()->GetAllMaps()) {
@@ -587,6 +590,14 @@ bool WebServer::routeControl(const std::string& req, std::string& response)
         long unsigned int id = slam_.GetAtlas()->GetCurrentMap()->GetId();
         slam_.SwitchToMap(id);
         std::cout << ">>> [Web] Created and switched to New Map ID: " << id << " <<<\n";
+        response = makeOkText();
+
+    } else if (req.find("GET /allow_new_maps?enable=") != std::string::npos) {
+        const bool enable = (req.find("enable=true") != std::string::npos);
+        allowMapCreation_ = enable;
+        slam_.SetAllowMapCreation(enable);
+        std::cout << ">>> [Web] Map creation on tracking loss: "
+                  << (enable ? "ENABLED" : "DISABLED") << " <<<\n";
         response = makeOkText();
 
     } else {

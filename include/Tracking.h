@@ -179,6 +179,12 @@ public:
     // True if local mapping is deactivated and we are performing only localization
     bool mbOnlyTracking;
 
+    // When false, the tracker will never call CreateMapInAtlas() on loss of tracking.
+    // Defaults to true (original upstream behaviour). Set to false to keep the
+    // system locked to the current map even in full mapping mode.
+    bool mbAllowMapCreation;
+    void SetAllowMapCreation(bool allow) { mbAllowMapCreation = allow; }
+
     void Reset(bool bLocMap = false);
     void ResetActiveMap(bool bLocMap = false);
 

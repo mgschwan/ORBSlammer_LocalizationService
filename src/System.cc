@@ -1386,6 +1386,11 @@ void System::SwitchToMap(long unsigned int mapId)
     }
 }
 
+void System::SetAllowMapCreation(bool allow)
+{
+    mpTracker->SetAllowMapCreation(allow);
+}
+
 int System::GetTrackingState()
 {
     unique_lock<mutex> lock(mMutexState);

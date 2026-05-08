@@ -194,6 +194,11 @@ public:
 
     void SwitchToMap(long unsigned int mapId);
 
+    // When allow=false the tracker never calls CreateMapInAtlas() on tracking loss,
+    // forcing continuous relocalization attempts against the current map.
+    // When allow=true (the default) the original upstream behaviour is restored.
+    void SetAllowMapCreation(bool allow);
+
     void SaveAtlas(const string &filename, int type);
     bool LoadAtlas(const string &filename, int type);
 

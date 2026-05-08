@@ -504,6 +504,10 @@ bool LoopClosing::NewDetectCommonRegions()
         std::chrono::steady_clock::time_point time_StartQuery = std::chrono::steady_clock::now();
 #endif
         mpKeyFrameDB->DetectNBestCandidates(mpCurrentKF, vpLoopBowCand, vpMergeBowCand,3);
+        cout << "[LC] KF " << mpCurrentKF->mnId
+             << " (map " << mpCurrentKF->GetMap()->GetId() << ")"
+             << " — BoW loop cands: " << vpLoopBowCand.size()
+             << "  merge cands: " << vpMergeBowCand.size() << endl;
 #ifdef REGISTER_TIMES
         std::chrono::steady_clock::time_point time_EndQuery = std::chrono::steady_clock::now();
 
@@ -593,8 +597,8 @@ bool LoopClosing::DetectAndReffineSim3FromLastKF(KeyFrame* pCurrentKF, KeyFrame*
 bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, KeyFrame* &pMatchedKF2, KeyFrame* &pLastCurrentKF, g2o::Sim3 &g2oScw,
                                              int &nNumCoincidences, std::vector<MapPoint*> &vpMPs, std::vector<MapPoint*> &vpMatchedMPs)
 {
-    int nBoWMatches = 20;
-    int nBoWInliers = 15;
+    int nBoWMatches = 10;     // was 20 — monocular cross-map BoW overlap is sparse
+    int nBoWInliers = 7;      // was 15 — must be ≤ nBoWMatches; Sim3/proj stages validate
     int nSim3Inliers = 20;
     int nProjMatches = 50;
     int nProjOptMatches = 80;
@@ -703,6 +707,11 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
 
         //pMostBoWMatchesKF = vpCovKFi[pMostBoWMatchesKF];
 
+        cout << "[LC] Candidate KF " << pKFi->mnId
+             << " (map " << pKFi->GetMap()->GetId() << ")"
+             << " — BoW matches: " << numBoWMatches
+             << " (need " << nBoWMatches << ")" << endl;
+
         if(numBoWMatches >= nBoWMatches) // TODO pick a good threshold
         {
             // Geometric validation
@@ -724,6 +733,7 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
                 //Verbose::PrintMess("BoW guess: Solver achieve " + to_string(nInliers) + " geometrical inliers among " + to_string(nBoWInliers) + " BoW matches", Verbose::VERBOSITY_DEBUG);
             }
 
+            cout << "[LC] Sim3 converged: " << (bConverge ? "YES" : "NO") << endl;
             if(bConverge)
             {
                 //std::cout << "Check BoW: SolverSim3 converged" << std::endl;
@@ -768,7 +778,7 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
                 vector<KeyFrame*> vpMatchedKF;
                 vpMatchedKF.resize(mpCurrentKF->GetMapPointMatches().size(), static_cast<KeyFrame*>(NULL));
                 int numProjMatches = matcher.SearchByProjection(mpCurrentKF, mScw, vpMapPoints, vpKeyFrames, vpMatchedMP, vpMatchedKF, 8, 1.5);
-                //cout <<"BoW: " << numProjMatches << " matches between " << vpMapPoints.size() << " points with coarse Sim3" << endl;
+                cout << "[LC] Proj matches (coarse): " << numProjMatches << " (need " << nProjMatches << ")" << endl;
 
                 if(numProjMatches >= nProjMatches)
                 {
@@ -780,6 +790,7 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
                         bFixedScale=false;
 
                     int numOptMatches = Optimizer::OptimizeSim3(mpCurrentKF, pKFi, vpMatchedMP, gScm, 10, mbFixScale, mHessian7x7, true);
+                    cout << "[LC] Sim3 opt inliers: " << numOptMatches << " (need " << nSim3Inliers << ")" << endl;
 
                     if(numOptMatches >= nSim3Inliers)
                     {
@@ -790,6 +801,7 @@ bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, 
                         vector<MapPoint*> vpMatchedMP;
                         vpMatchedMP.resize(mpCurrentKF->GetMapPointMatches().size(), static_cast<MapPoint*>(NULL));
                         int numProjOptMatches = matcher.SearchByProjection(mpCurrentKF, mScw, vpMapPoints, vpMatchedMP, 5, 1.0);
+                        cout << "[LC] Proj matches (fine): " << numProjOptMatches << " (need " << nProjOptMatches << ")" << endl;
 
                         if(numProjOptMatches >= nProjOptMatches)
                         {

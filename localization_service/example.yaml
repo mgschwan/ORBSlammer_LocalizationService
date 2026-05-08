@@ -5,7 +5,7 @@
 #--------------------------------------------------------------------------------------------
 File.version: "1.0"
 
-loopClosing: 0
+loopClosing: 1
 
 Camera.type: "KannalaBrandt8"
 
@@ -72,4 +72,4 @@ Viewer.ViewpointF: 500.0
 
 # The store file is created from the current session, if a file with the same name exists it is deleted
 #System.SaveAtlasToFile: "Session_mgschwan_calibrated"
-System.SaveAtlasToFile: "Session_Mgschwan_Mono2"
+#System.SaveAtlasToFile: "Session_Mgschwan_Mono2"
