@@ -7,6 +7,17 @@ File.version: "1.0"
 
 loopClosing: 1
 
+# Merge detection thresholds for map merging via loop closing.
+# Lower values make merging easier (useful for monocular where cross-map
+# BoW overlap is sparse). The Sim3 and projection stages still validate.
+# Defaults: mergeMinBoWMatches=10, mergeMinBoWInliers=7,
+#           mergeMinSim3Inliers=20, mergeMinProjMatches=50, mergeMinProjOptMatches=80
+mergeMinBoWMatches:    10
+mergeMinBoWInliers:     7
+mergeMinSim3Inliers:   20
+mergeMinProjMatches:   50
+mergeMinProjOptMatches: 80
+
 Camera.type: "KannalaBrandt8"
 
 # Camera calibration and distortion parameters (OpenCV) 

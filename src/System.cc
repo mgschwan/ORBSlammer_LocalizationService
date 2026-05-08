@@ -110,6 +110,19 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         cout << "loopClosing not found in settings file. Using default value: true" << endl;
     }
 
+    auto readInt = [&](const char* key, int def) -> int {
+        cv::FileNode n = fsSettings[key];
+        if (n.empty()) return def;
+        int v = static_cast<int>(n);
+        cout << key << ": " << v << endl;
+        return v;
+    };
+    int mergeBoWMatches    = readInt("mergeMinBoWMatches",    10);
+    int mergeBoWInliers    = readInt("mergeMinBoWInliers",     7);
+    int mergeSim3Inliers   = readInt("mergeMinSim3Inliers",   20);
+    int mergeProjMatches   = readInt("mergeMinProjMatches",   50);
+    int mergeProjOptMatches= readInt("mergeMinProjOptMatches",80);
+
     mStrVocabularyFilePath = strVocFile;
 
     bool loadedAtlas = false;
@@ -215,7 +228,9 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
 
     //Initialize the Loop Closing thread and launch
     // mSensor!=MONOCULAR && mSensor!=IMU_MONOCULAR
-    mpLoopCloser = new LoopClosing(mpAtlas, mpKeyFrameDatabase, mpVocabulary, mSensor!=MONOCULAR, activeLC); // mSensor!=MONOCULAR);
+    mpLoopCloser = new LoopClosing(mpAtlas, mpKeyFrameDatabase, mpVocabulary, mSensor!=MONOCULAR, activeLC,
+                                   mergeBoWMatches, mergeBoWInliers, mergeSim3Inliers,
+                                   mergeProjMatches, mergeProjOptMatches);
     mptLoopClosing = new thread(&ORB_SLAM3::LoopClosing::Run, mpLoopCloser);
 
     //Set pointers between threads

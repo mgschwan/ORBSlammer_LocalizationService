@@ -52,7 +52,9 @@ public:
 
 public:
 
-    LoopClosing(Atlas* pAtlas, KeyFrameDatabase* pDB, ORBVocabulary* pVoc,const bool bFixScale, const bool bActiveLC);
+    LoopClosing(Atlas* pAtlas, KeyFrameDatabase* pDB, ORBVocabulary* pVoc, const bool bFixScale, const bool bActiveLC,
+                int nMergeBoWMatches = 10, int nMergeBoWInliers = 7,
+                int nMergeSim3Inliers = 20, int nMergeProjMatches = 50, int nMergeProjOptMatches = 80);
 
     void SetTracker(Tracking* pTracker);
 
@@ -241,6 +243,13 @@ protected:
 
     // To (de)activate LC
     bool mbActiveLC = true;
+
+    // Merge detection thresholds (configurable via YAML)
+    int mnMergeBoWMatches;
+    int mnMergeBoWInliers;
+    int mnMergeSim3Inliers;
+    int mnMergeProjMatches;
+    int mnMergeProjOptMatches;
 
 #ifdef REGISTER_LOOP
     string mstrFolderLoop;

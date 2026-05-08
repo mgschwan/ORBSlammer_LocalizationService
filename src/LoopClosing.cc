@@ -32,11 +32,15 @@
 namespace ORB_SLAM3
 {
 
-LoopClosing::LoopClosing(Atlas *pAtlas, KeyFrameDatabase *pDB, ORBVocabulary *pVoc, const bool bFixScale, const bool bActiveLC):
+LoopClosing::LoopClosing(Atlas *pAtlas, KeyFrameDatabase *pDB, ORBVocabulary *pVoc, const bool bFixScale, const bool bActiveLC,
+                         int nMergeBoWMatches, int nMergeBoWInliers, int nMergeSim3Inliers,
+                         int nMergeProjMatches, int nMergeProjOptMatches):
     mbResetRequested(false), mbResetActiveMapRequested(false), mbFinishRequested(false), mbFinished(true), mpAtlas(pAtlas),
     mpKeyFrameDB(pDB), mpORBVocabulary(pVoc), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
     mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), mnFullBAIdx(0), mnLoopNumCoincidences(0), mnMergeNumCoincidences(0),
-    mbLoopDetected(false), mbMergeDetected(false), mnLoopNumNotFound(0), mnMergeNumNotFound(0), mbActiveLC(bActiveLC)
+    mbLoopDetected(false), mbMergeDetected(false), mnLoopNumNotFound(0), mnMergeNumNotFound(0), mbActiveLC(bActiveLC),
+    mnMergeBoWMatches(nMergeBoWMatches), mnMergeBoWInliers(nMergeBoWInliers), mnMergeSim3Inliers(nMergeSim3Inliers),
+    mnMergeProjMatches(nMergeProjMatches), mnMergeProjOptMatches(nMergeProjOptMatches)
 {
     mnCovisibilityConsistencyTh = 3;
     mpLastCurrentKF = static_cast<KeyFrame*>(NULL);
@@ -597,11 +601,11 @@ bool LoopClosing::DetectAndReffineSim3FromLastKF(KeyFrame* pCurrentKF, KeyFrame*
 bool LoopClosing::DetectCommonRegionsFromBoW(std::vector<KeyFrame*> &vpBowCand, KeyFrame* &pMatchedKF2, KeyFrame* &pLastCurrentKF, g2o::Sim3 &g2oScw,
                                              int &nNumCoincidences, std::vector<MapPoint*> &vpMPs, std::vector<MapPoint*> &vpMatchedMPs)
 {
-    int nBoWMatches = 10;     // was 20 — monocular cross-map BoW overlap is sparse
-    int nBoWInliers = 7;      // was 15 — must be ≤ nBoWMatches; Sim3/proj stages validate
-    int nSim3Inliers = 20;
-    int nProjMatches = 50;
-    int nProjOptMatches = 80;
+    int nBoWMatches     = mnMergeBoWMatches;
+    int nBoWInliers     = mnMergeBoWInliers;
+    int nSim3Inliers    = mnMergeSim3Inliers;
+    int nProjMatches    = mnMergeProjMatches;
+    int nProjOptMatches = mnMergeProjOptMatches;
 
     set<KeyFrame*> spConnectedKeyFrames = mpCurrentKF->GetConnectedKeyFrames();
 
