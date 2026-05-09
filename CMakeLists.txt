@@ -146,3 +146,35 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/Examples/Monocular)
 add_executable(inspect_osa
         Examples/Monocular/inspect_osa.cc)
 target_link_libraries(inspect_osa ${PROJECT_NAME} -lGL -lboost_serialization)
+
+
+# Install targets for AppImage packaging
+# Set CMAKE_INSTALL_PREFIX to the AppDir path when building for AppImage:
+#   cmake --install <build_dir> --prefix /path/to/AppDir
+# Use FILES/PROGRAMS (not TARGETS) to skip CMake's RPATH rewriting, which
+# fails on this toolchain due to a trailing-colon bug in cmake_install.cmake.
+install(FILES ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libORB_SLAM3.so
+        DESTINATION usr/lib)
+
+install(FILES
+        ${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
+        ${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
+        DESTINATION usr/lib)
+
+install(PROGRAMS
+        ${PROJECT_SOURCE_DIR}/localization_service/localization_service_host
+        DESTINATION .)
+
+install(DIRECTORY localization_service/html/
+        DESTINATION html)
+
+# AppRun resolves APPDIR_LIBC_LINKER_PATH relative to the AppDir root, so
+# lib64/ld-linux-x86-64.so.2 must exist there.  appimage-builder moves the
+# libc6 package files into runtime/compat/ and leaves AppDir/lib64/ empty,
+# so we install the system linker here explicitly.
+find_file(LD_LINUX_SO ld-linux-x86-64.so.2
+    PATHS /lib/x86_64-linux-gnu /lib64
+    NO_DEFAULT_PATH)
+if(LD_LINUX_SO)
+    install(PROGRAMS ${LD_LINUX_SO} DESTINATION lib64)
+endif()

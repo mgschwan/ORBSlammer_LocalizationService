@@ -14,28 +14,28 @@ AppDir:
     - amd64
     allow_unauthenticated: true
     sources:
-    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ jammy main restricted
-    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ jammy-updates main restricted
-    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ jammy universe
-    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ jammy-updates universe
-    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ jammy multiverse
-    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ jammy-updates multiverse
-    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ jammy-backports main restricted
+    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ noble main restricted
+    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ noble-updates main restricted
+    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ noble universe
+    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ noble-updates universe
+    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ noble multiverse
+    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ noble-updates multiverse
+    - sourceline: deb http://at.archive.ubuntu.com/ubuntu/ noble-backports main restricted
         universe multiverse
-    - sourceline: deb http://security.ubuntu.com/ubuntu jammy-security main restricted
-    - sourceline: deb http://security.ubuntu.com/ubuntu jammy-security universe
-    - sourceline: deb http://security.ubuntu.com/ubuntu jammy-security multiverse
+    - sourceline: deb http://security.ubuntu.com/ubuntu noble-security main restricted
+    - sourceline: deb http://security.ubuntu.com/ubuntu noble-security universe
+    - sourceline: deb http://security.ubuntu.com/ubuntu noble-security multiverse
     include:
     - libc6:amd64
-    - libopencv-videoio4.5d
-    - libopencv-imgcodecs4.5d
-    - libopencv-calib3d4.5d
-    - libopencv-imgproc4.5d
-    - libopencv-core4.5d
-    - libopencv-features2d4.5d
-    - libopencv-flann4.5d
-    - libboost-serialization1.74.0
-    - libv4l-0
+    - libopencv-videoio406t64
+    - libopencv-imgcodecs406t64
+    - libopencv-calib3d406t64
+    - libopencv-imgproc406t64
+    - libopencv-core406t64
+    - libopencv-features2d406t64
+    - libopencv-flann406t64
+    - libboost-serialization1.83.0
+    - libv4l-0t64
   files:
     include: []
     exclude:
