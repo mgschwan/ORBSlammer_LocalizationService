@@ -4,7 +4,7 @@ A real-time visual localization service built on [ORB-SLAM3](README_ORB_SLAM.md)
 
 ## Demo
 
-[![ORBSlammer Localization Service Introduction](https://img.youtube.com/vi/Y3oGrWXJzEI/0.jpg)](https://youtu.be/Y3oGrWXJzEI)
+[![ORBSlammer Localization Service Introduction](https://img.youtube.com/vi/kERIrPdpNNk/0.jpg)](https://youtu.be/kERIrPdpNNk)
 
 ## Overview
 
