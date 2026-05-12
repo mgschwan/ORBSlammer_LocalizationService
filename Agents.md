@@ -223,6 +223,55 @@ else if (mState == LOST)
 - DBoW2 & g2o (included in Thirdparty)
 - (Optional) Pangolin
 
+## Known Build and Runtime Issues
+
+### SIGSEGV in g2o SE3Quat push_back during Bundle Adjustment (GCC 13)
+
+**Symptom:** The process crashes with a segmentation fault inside
+`std::vector<g2o::SE3Quat, Eigen::aligned_allocator<g2o::SE3Quat>>::push_back`
+during the initial map creation (`Tracking::CreateInitialMapMonocular` →
+`Optimizer::GlobalBundleAdjustment`). A GDB backtrace will show the `this`
+pointer of the `SE3Quat` constructor pointing into `main_arena` (glibc's
+internal malloc state), e.g.:
+
+```
+#0  g2o::SE3Quat::SE3Quat (this=0x7ffff6803b50 <main_arena+144>) ...
+#6  g2o::BaseVertex<6, g2o::SE3Quat>::push ...
+#13 ORB_SLAM3::Tracking::CreateInitialMapMonocular ...
+```
+
+**Root cause:** GCC 13 emits a false-positive `-Warray-bounds` warning for SSE
+intrinsics reading Eigen fixed-size arrays (triggered in `Sophus/sophus/sim2.hpp`
+via `rxso2().params()`). Because Sophus's `CMakeLists.txt` compiles with
+`-Werror`, this turns the warning into a compilation error. On systems where
+Sophus was previously compiled with an older GCC that did not emit the warning,
+the Sophus build appears to succeed but the test binary is left in a broken state
+that can corrupt the heap at runtime when the g2o aligned allocator is exercised.
+Recompiling on GCC 13 without the fix causes a hard build error that reveals the
+problem.
+
+**Fix:** Two changes are required (both already applied in this repo):
+
+1. `Thirdparty/Sophus/CMakeLists.txt` — add `-Wno-array-bounds` to the GCC
+   flags so the false-positive is suppressed:
+   ```cmake
+   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror -Wextra -std=c++11
+       -Wno-deprecated-declarations -Wno-array-bounds -ftemplate-backtrace-limit=0")
+   ```
+
+2. `build.sh` — pass `-DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF` when configuring
+   Sophus, since ORB-SLAM3 only needs the Sophus headers:
+   ```bash
+   cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
+   ```
+
+**When rebuilding on a new system:** always delete `Thirdparty/Sophus/build/`
+before re-running `build.sh` so CMake picks up the updated flags:
+```bash
+rm -rf Thirdparty/Sophus/build
+./build.sh
+```
+
 ## Usage
 The new executables are output to their respective source directories after compilation.
 Example for `localization_service_host`:

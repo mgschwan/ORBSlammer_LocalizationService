@@ -6,6 +6,7 @@
 
 #include "localization_service/config.h"
 #include "localization_service/slam_state.h"
+#include "localization_service/ingest_queue.h"
 
 namespace ORB_SLAM3 { class System; }
 
@@ -31,6 +32,7 @@ public:
               std::atomic<bool>&  localizationMode,
               std::atomic<bool>&  allowMapCreation,
               long unsigned int   initialMapId,
+              IngestQueue*        ingestQueue,       // nullptr → /api/frame disabled
               std::string         staticFileRoot = kStaticFileRoot);
 
     ~WebServer();
@@ -65,6 +67,10 @@ private:
     bool routeAtlas     (const std::string& req, int fd,
                          const std::string& rawRequest, size_t headerEnd,
                          std::string& response, bool& socketConsumed);
+
+    bool routeIngest    (const std::string& req, int fd, size_t headerEnd,
+                         std::string& response);
+    std::string handleFramePost(int fd, const std::string& rawRequest, size_t headerEnd);
 
     bool routeControl   (const std::string& req,
                          std::string& response);
@@ -105,6 +111,7 @@ private:
     std::atomic<bool>&  localizationMode_;
     std::atomic<bool>&  allowMapCreation_;
     long unsigned int   initialMapId_;
+    IngestQueue*        ingestQueue_;
     std::string         staticFileRoot_;
     int                 serverFd_{-1};
 };

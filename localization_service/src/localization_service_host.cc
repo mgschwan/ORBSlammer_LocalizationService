@@ -25,6 +25,7 @@
 
 #include "localization_service/config.h"
 #include "localization_service/slam_state.h"
+#include "localization_service/ingest_queue.h"
 #include "localization_service/calibration_manager.h"
 #include "localization_service/web_server.h"
 
@@ -108,8 +109,9 @@ int main(int argc, char** argv)
 {
     if (argc < 4) {
         std::cerr << "\nUsage: ./localization_service_host"
-                     " path_to_vocabulary path_to_settings camera_url"
-                     " [localize_only] [map_id]\n\n";
+                     " path_to_vocabulary path_to_settings camera_url|none"
+                     " [localize_only] [map_id]\n\n"
+                     "  camera_url: V4L2 device, MJPEG/RTSP URL, or 'none' to use POST /api/frame\n\n";
         return 0; // appimage builder needs to be able to call it without an error code
     }
 
@@ -118,11 +120,17 @@ int main(int argc, char** argv)
     const std::string cameraSource = argv[3];
     const bool        startInLocMode = (argc >= 5);
     const long unsigned int mapId  = (argc >= 6) ? std::stoul(argv[5]) : 0;
+    const bool        useIngest    = (cameraSource == "none");
 
-    cv::VideoCapture cap = openCamera(cameraSource);
-    if (!cap.isOpened()) {
-        std::cerr << "Failed to open camera: " << cameraSource << "\n";
-        return 1;
+    cv::VideoCapture cap;
+    if (!useIngest) {
+        cap = openCamera(cameraSource);
+        if (!cap.isOpened()) {
+            std::cerr << "Failed to open camera: " << cameraSource << "\n";
+            return 1;
+        }
+    } else {
+        std::cout << "Camera source: none — frames will be received via POST /api/frame\n";
     }
 
     std::cout << "Initializing ORB-SLAM3\n";
@@ -134,6 +142,7 @@ int main(int argc, char** argv)
     // Shared state
     LifecycleFlags     flags;
     PoseState          pose;
+    IngestQueue        ingestQueue;
     std::atomic<bool>  localizationMode{false};
     std::atomic<bool>  allowMapCreation{true};
 
@@ -160,7 +169,8 @@ int main(int argc, char** argv)
 
     // Components
     CalibrationManager calib(slam);
-    WebServer          server(slam, flags, pose, calib, localizationMode, allowMapCreation, mapId, staticFileRoot);
+    WebServer          server(slam, flags, pose, calib, localizationMode, allowMapCreation, mapId,
+                              useIngest ? &ingestQueue : nullptr, staticFileRoot);
 
     // Control thread: HTTP server + stdin commands
     std::thread controlThread([&]() {
@@ -194,22 +204,33 @@ int main(int argc, char** argv)
     // ---- Main tracking loop ------------------------------------------------
     std::cout << "\n-------\nStart processing sequence ...\n";
     cv::Mat frame;
+    double  tframe = 0.0;
 
     while (flags.running) {
+        if (useIngest) {
+            IngestFrame ingest;
+            if (!ingestQueue.pop(ingest, kPauseSleepUs))
+                continue;
+            frame  = std::move(ingest.image);
+            tframe = ingest.timestamp;
+            // IMU data from ingest.{ax,ay,az,gx,gy,gz} is available here
+            // for future TrackMonocular_Inertial support.
+        } else {
+            // Always drain the capture buffer so we get the freshest frame.
+            cap.read(frame);
+            if (frame.empty()) {
+                std::cout << "No image received\n";
+                usleep(kPauseSleepUs);
+                continue;
+            }
 #ifdef COMPILEDWITHC11
-        auto now   = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now();
 #else
-        auto now   = std::chrono::monotonic_clock::now();
+            auto now = std::chrono::monotonic_clock::now();
 #endif
-        double tframe = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            now.time_since_epoch()).count();
-
-        // Always drain the capture buffer so we get the freshest frame
-        cap.read(frame);
-        if (frame.empty()) {
-            std::cout << "No image received\n";
-            usleep(kPauseSleepUs);
-            continue;
+            tframe = static_cast<double>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now.time_since_epoch()).count());
         }
 
         if (imageScale != 1.f) {

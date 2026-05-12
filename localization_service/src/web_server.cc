@@ -3,7 +3,9 @@
 
 #include <iostream>
 #include <fstream>
+#include <chrono>
 #include <thread>
+#include <vector>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -30,6 +32,7 @@ WebServer::WebServer(ORB_SLAM3::System&  slam,
                      std::atomic<bool>&  localizationMode,
                      std::atomic<bool>&  allowMapCreation,
                      long unsigned int   initialMapId,
+                     IngestQueue*        ingestQueue,
                      std::string         staticFileRoot)
     : slam_(slam)
     , flags_(flags)
@@ -38,6 +41,7 @@ WebServer::WebServer(ORB_SLAM3::System&  slam,
     , localizationMode_(localizationMode)
     , allowMapCreation_(allowMapCreation)
     , initialMapId_(initialMapId)
+    , ingestQueue_(ingestQueue)
     , staticFileRoot_(std::move(staticFileRoot))
 {}
 
@@ -152,6 +156,7 @@ void WebServer::handleConnection(int clientFd)
     else if (routeMap       (rawRequest, response))                           {}
     else if (routeAtlas     (rawRequest, clientFd, rawRequest, headerEnd,
                               response, socketConsumed))                      {}
+    else if (routeIngest    (rawRequest, clientFd, headerEnd, response))      {}
     else if (routeControl   (rawRequest, response))                           {}
     else if (routeStaticFile(rawRequest, response))                           {}
     else
@@ -513,6 +518,93 @@ std::string WebServer::handleAtlasUpload(int fd, const std::string& rawRequest,
     }
     std::cerr << ">>> [Web] Failed to load uploaded atlas <<<\n";
     return make500("Load failed");
+}
+
+// ============================================================================
+// Route: POST /api/frame  (single-frame ingest, option 1)
+// ============================================================================
+
+bool WebServer::routeIngest(const std::string& req, int fd,
+                             size_t headerEnd, std::string& response)
+{
+    if (req.find("POST /api/frame") == std::string::npos)
+        return false;
+
+    if (!ingestQueue_) {
+        response = make500("Ingest not configured");
+        return true;
+    }
+
+    response = handleFramePost(fd, req, headerEnd);
+    return true;
+}
+
+std::string WebServer::handleFramePost(int fd, const std::string& rawRequest,
+                                        size_t headerEnd)
+{
+    const size_t clPos = rawRequest.find("Content-Length: ");
+    if (clPos == std::string::npos)
+        return "HTTP/1.1 411 Length Required\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nLength Required";
+
+    const size_t clEnd      = rawRequest.find("\r\n", clPos);
+    const long   totalBytes = std::stol(rawRequest.substr(clPos + 16, clEnd - (clPos + 16)));
+
+    if (totalBytes <= 0 || totalBytes > 10 * 1024 * 1024)
+        return makeBadRequest();
+
+    // Collect body — part of it may already be in the read buffer with the headers.
+    std::string body = rawRequest.substr(headerEnd + 4);
+    body.reserve(totalBytes);
+    long remaining = totalBytes - static_cast<long>(body.size());
+
+    char chunk[kUploadChunkBytes];
+    while (remaining > 0) {
+        int n = read(fd, chunk, std::min(static_cast<long>(sizeof(chunk)), remaining));
+        if (n <= 0) break;
+        body.append(chunk, n);
+        remaining -= n;
+    }
+
+    if (static_cast<long>(body.size()) < totalBytes)
+        return make500("Incomplete frame body");
+
+    std::vector<uchar> buf(body.begin(), body.end());
+    cv::Mat img = cv::imdecode(buf, cv::IMREAD_COLOR);
+    if (img.empty())
+        return makeBadRequest();
+
+    IngestFrame frame;
+    frame.image = std::move(img);
+
+    const std::string tsStr = queryParam(rawRequest, "ts");
+    if (!tsStr.empty()) {
+        try { frame.timestamp = std::stod(tsStr); } catch (...) {}
+    }
+    if (frame.timestamp == 0.0) {
+        frame.timestamp = static_cast<double>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+    }
+
+    const std::string axStr = queryParam(rawRequest, "ax");
+    if (!axStr.empty()) {
+        frame.hasImu = true;
+        frame.ax = queryFloat(rawRequest, "ax");
+        frame.ay = queryFloat(rawRequest, "ay");
+        frame.az = queryFloat(rawRequest, "az");
+        frame.gx = queryFloat(rawRequest, "gx");
+        frame.gy = queryFloat(rawRequest, "gy");
+        frame.gz = queryFloat(rawRequest, "gz");
+    }
+
+    if (!ingestQueue_->push(std::move(frame)))
+        return "HTTP/1.1 503 Service Unavailable\r\n"
+               "Content-Type: text/plain\r\n"
+               "Retry-After: 0\r\n"
+               "Connection: close\r\n\r\n"
+               "Queue full, drop frame and retry";
+
+    return makeOkText();
 }
 
 // ============================================================================
