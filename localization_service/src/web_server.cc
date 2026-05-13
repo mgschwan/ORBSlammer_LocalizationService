@@ -18,6 +18,7 @@
 #include <System.h>
 #include <Atlas.h>
 #include <Map.h>
+#include <Tracking.h>
 
 namespace localization_service {
 
@@ -524,6 +525,39 @@ std::string WebServer::handleAtlasUpload(int fd, const std::string& rawRequest,
 // Route: POST /api/frame  (single-frame ingest, option 1)
 // ============================================================================
 
+// Build the JSON payload returned by every /api/frame response.
+// queued=true  → a frame was decoded and pushed to the ingest queue.
+// queued=false → empty-body POST; pose snapshot only, no frame submitted.
+std::string WebServer::makePoseJson(bool queued) const
+{
+    auto snap = pose_.snapshot();
+
+    const int trackState = slam_.GetTrackingState();
+    const char* stateStr =
+        (trackState == ORB_SLAM3::Tracking::OK)             ? "OK"             :
+        (trackState == ORB_SLAM3::Tracking::RECENTLY_LOST)  ? "RECENTLY_LOST"  :
+        (trackState == ORB_SLAM3::Tracking::LOST)           ? "LOST"           :
+        (trackState == ORB_SLAM3::Tracking::NOT_INITIALIZED)? "NOT_INITIALIZED":
+                                                              "UNKNOWN";
+    std::string json =
+        std::string("{\"queued\":") + (queued ? "true" : "false") +
+        ",\"tracking_state\":\"" + stateStr + "\"" +
+        ",\"pose\":{\"valid\":"  + (snap.valid ? "true" : "false");
+
+    if (snap.valid) {
+        json += ",\"x\":"  + std::to_string(snap.x)
+              + ",\"y\":"  + std::to_string(snap.y)
+              + ",\"z\":"  + std::to_string(snap.z)
+              + ",\"qx\":" + std::to_string(snap.qx)
+              + ",\"qy\":" + std::to_string(snap.qy)
+              + ",\"qz\":" + std::to_string(snap.qz)
+              + ",\"qw\":" + std::to_string(snap.qw);
+    }
+
+    json += "}}";
+    return makeOkJson(json);
+}
+
 bool WebServer::routeIngest(const std::string& req, int fd,
                              size_t headerEnd, std::string& response)
 {
@@ -542,14 +576,18 @@ bool WebServer::routeIngest(const std::string& req, int fd,
 std::string WebServer::handleFramePost(int fd, const std::string& rawRequest,
                                         size_t headerEnd)
 {
+    // Empty-body POST → pose-only query; no frame submitted.
     const size_t clPos = rawRequest.find("Content-Length: ");
     if (clPos == std::string::npos)
-        return "HTTP/1.1 411 Length Required\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nLength Required";
+        return makePoseJson(false);
 
     const size_t clEnd      = rawRequest.find("\r\n", clPos);
     const long   totalBytes = std::stol(rawRequest.substr(clPos + 16, clEnd - (clPos + 16)));
 
-    if (totalBytes <= 0 || totalBytes > 10 * 1024 * 1024)
+    if (totalBytes == 0)
+        return makePoseJson(false);
+
+    if (totalBytes > 10 * 1024 * 1024)
         return makeBadRequest();
 
     // Collect body — part of it may already be in the read buffer with the headers.
@@ -599,12 +637,12 @@ std::string WebServer::handleFramePost(int fd, const std::string& rawRequest,
 
     if (!ingestQueue_->push(std::move(frame)))
         return "HTTP/1.1 503 Service Unavailable\r\n"
-               "Content-Type: text/plain\r\n"
+               "Content-Type: application/json\r\n"
                "Retry-After: 0\r\n"
                "Connection: close\r\n\r\n"
-               "Queue full, drop frame and retry";
+               "{\"queued\":false,\"error\":\"queue full\"}";
 
-    return makeOkText();
+    return makePoseJson(true);
 }
 
 // ============================================================================

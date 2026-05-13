@@ -6,8 +6,21 @@ Reads frames from a local camera (or video file / MJPEG URL) and forwards
 them to a localization_service_host instance that was started with 'none'
 as the camera source, so it accepts frames via POST /api/frame.
 
-Simultaneously subscribes to the SSE pose stream (/api/stream/pose) and
-prints the current position in the terminal.
+POST /api/frame with a JPEG body queues a frame for tracking and returns the
+most recently computed pose.  POST /api/frame with an empty body returns the
+current pose without submitting a new frame — useful for polling after a frame
+has been submitted but before the next one is ready.
+
+Response format (both variants):
+    {
+        "queued": true | false,
+        "tracking_state": "OK" | "RECENTLY_LOST" | "LOST" | "NOT_INITIALIZED",
+        "pose": {
+            "valid": true | false,
+            "x": 1.23, "y": 0.45, "z": 0.67,
+            "qx": 0.0,  "qy": 0.0,  "qz": 0.0, "qw": 1.0
+        }
+    }
 
 Usage
 -----
@@ -37,7 +50,6 @@ import argparse
 import json
 import signal
 import sys
-import threading
 import time
 
 import cv2
@@ -98,43 +110,37 @@ def open_camera(source: str) -> cv2.VideoCapture:
 
 
 # ---------------------------------------------------------------------------
-# Background SSE pose listener
+# Pose formatting
 # ---------------------------------------------------------------------------
-def pose_listener(server: str, stop: threading.Event) -> None:
-    """Connect to /api/stream/pose and print pose updates to stdout."""
-    url = f"{server}/api/stream/pose"
-    while not stop.is_set():
-        try:
-            with requests.get(url, stream=True, timeout=5) as resp:
-                for raw in resp.iter_lines():
-                    if stop.is_set():
-                        return
-                    if not raw or not raw.startswith(b"data: "):
-                        continue
-                    try:
-                        data = json.loads(raw[6:])
-                    except json.JSONDecodeError:
-                        continue
-                    if data.get("valid"):
-                        print(
-                            f"\r  Pose  "
-                            f"x={data['x']:+.3f}  "
-                            f"y={data['y']:+.3f}  "
-                            f"z={data['z']:+.3f}    ",
-                            end="", flush=True,
-                        )
-                    else:
-                        print(
-                            "\r  [tracking lost]                              ",
-                            end="", flush=True,
-                        )
-        except requests.exceptions.ConnectionError:
-            if not stop.is_set():
-                time.sleep(1)   # retry after a short pause
-        except Exception as exc:
-            if not stop.is_set():
-                print(f"\n[pose thread] {exc}")
-            return
+def format_pose(data: dict) -> str:
+    """Return a one-line summary of a /api/frame response."""
+    state = data.get("tracking_state", "?")
+    pose  = data.get("pose", {})
+    if pose.get("valid"):
+        return (
+            f"[{state}]  "
+            f"x={pose['x']:+.3f}  y={pose['y']:+.3f}  z={pose['z']:+.3f}"
+        )
+    return f"[{state}]  (no valid pose)"
+
+
+# ---------------------------------------------------------------------------
+# Single-shot localization helper
+# (illustrates the empty-body poll pattern)
+# ---------------------------------------------------------------------------
+def query_pose(session: requests.Session, frame_url: str,
+               timeout: float = 1.0) -> dict | None:
+    """
+    POST with empty body to retrieve the current pose without submitting a frame.
+    Returns the parsed JSON dict or None on error.
+    """
+    try:
+        resp = session.post(frame_url, data=b"", timeout=timeout)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -154,19 +160,14 @@ def main() -> None:
         sys.exit(1)
 
     # Clean Ctrl-C shutdown
-    stop = threading.Event()
+    running = True
 
     def on_sigint(_sig, _frame):
+        nonlocal running
         print("\nStopping...")
-        stop.set()
+        running = False
 
     signal.signal(signal.SIGINT, on_sigint)
-
-    # Pose display thread
-    pose_thread = threading.Thread(
-        target=pose_listener, args=(args.server, stop), daemon=True
-    )
-    pose_thread.start()
 
     # Re-use one HTTP session for connection keep-alive
     session = requests.Session()
@@ -180,7 +181,7 @@ def main() -> None:
     print(f"Target  : {args.fps:.1f} fps, JPEG quality {args.quality}")
     print("Press Ctrl+C to stop.\n")
 
-    while not stop.is_set():
+    while running:
         t_loop = time.monotonic()
 
         ret, frame = cap.read()
@@ -205,9 +206,13 @@ def main() -> None:
             )
             if resp.status_code == 200:
                 frames_sent += 1
+                try:
+                    print(f"\r  {format_pose(resp.json())}    ", end="", flush=True)
+                except (json.JSONDecodeError, KeyError):
+                    pass
             elif resp.status_code == 503:
-                # Tracker is still processing the previous frame — drop this one.
-                # This is normal at startup or during heavy processing; no action needed.
+                # Tracker still processing the previous frame — drop this one.
+                # This is normal at startup or during heavy processing.
                 frames_dropped += 1
             else:
                 print(
@@ -231,7 +236,6 @@ def main() -> None:
             time.sleep(sleep_for)
 
     # Shutdown
-    stop.set()
     cap.release()
     if args.show:
         cv2.destroyAllWindows()
@@ -243,6 +247,30 @@ def main() -> None:
         f" ({frames_sent / elapsed:.1f} fps effective)"
     )
 
+
+# ---------------------------------------------------------------------------
+# Single-shot localization example
+# ---------------------------------------------------------------------------
+# Typical usage pattern for a device that wants one position fix:
+#
+#   session = requests.Session()
+#   url     = "http://host:11142/api/frame"
+#
+#   # 1. Submit a frame.
+#   _, buf = cv2.imencode(".jpg", frame)
+#   r = session.post(url, data=buf.tobytes(),
+#                    params={"ts": f"{time.monotonic()*1000:.3f}"},
+#                    headers={"Content-Type": "image/jpeg"})
+#   data = r.json()                        # pose from the *previous* frame
+#
+#   # 2. Poll with empty body until tracking_state is OK.
+#   for _ in range(10):
+#       data = query_pose(session, url)
+#       if data and data["pose"]["valid"]:
+#           break
+#       time.sleep(0.05)
+#
+#   print(data["pose"])
 
 if __name__ == "__main__":
     main()

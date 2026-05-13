@@ -96,6 +96,11 @@ private:
     static std::string makeBadRequest ();
     static std::string mimeType       (const std::string& path);
 
+    // Builds the JSON body returned by every POST /api/frame response.
+    // queued=true  → a frame was accepted into the ingest queue.
+    // queued=false → empty-body request; pose snapshot only.
+    std::string makePoseJson(bool queued) const;
+
     // ---- Query-string helpers ----------------------------------------------
     static std::string queryParam  (const std::string& req, const std::string& key);
     static double      queryDouble (const std::string& req, const std::string& key,
