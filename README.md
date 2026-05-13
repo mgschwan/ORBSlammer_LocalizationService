@@ -84,6 +84,9 @@ The last argument is the map index to relocalize against (default `0`).
 | V4L2 device path | `/dev/video2` |
 | MJPEG / RTSP stream | `http://192.168.1.10:4747/video` |
 | Tello drone | use `tools/tello_camera_server.py` then point to its output URL |
+| External push (API) | `none` — frames are submitted via `POST /api/frame` |
+
+When started with `none`, the service waits for frames to be pushed over HTTP instead of reading from a camera device. See [Frame ingest](#frame-ingest) and [Single-shot localization](#single-shot-localization).
 
 ## HTTP API
 
@@ -130,6 +133,34 @@ Each event is a JSON object:
 ```
 
 When tracking is lost: `{ "valid": false }`
+
+### Frame ingest
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/frame?ts=T` | Submit a JPEG frame for tracking; returns current pose as JSON |
+| `POST` | `/api/frame` (empty body) | Query current pose without submitting a frame |
+
+The request body must be a raw JPEG. Optional query parameters:
+
+| Parameter | Description |
+|-----------|-------------|
+| `ts` | Timestamp in milliseconds (monotonic clock). Defaults to server time if omitted. |
+| `ax`, `ay`, `az` | Accelerometer reading m/s² (enables IMU path when all provided) |
+| `gx`, `gy`, `gz` | Gyroscope reading rad/s |
+
+Response (both variants):
+
+```json
+{
+  "queued": true,
+  "tracking_state": "OK",
+  "pose": { "valid": true, "x": 1.23, "y": 0.45, "z": 0.67,
+            "qx": 0.0, "qy": 0.0, "qz": 0.0, "qw": 1.0 }
+}
+```
+
+`queued: false` is returned when the body is empty (pose-only query). `tracking_state` is one of `OK`, `RECENTLY_LOST`, `LOST`, `NOT_INITIALIZED`. HTTP 503 is returned when the ingest queue is full — the client should drop the frame and retry.
 
 ### Map
 
@@ -208,6 +239,61 @@ The merge pipeline is cascaded: a candidate must pass every stage in order. The 
 |-----|------|---------|-------------|
 | *(no YAML key — runtime only)* | — | — | Whether to create a new map when tracking is lost is controlled at runtime via `/allow_new_maps` or the `newmaps_on` / `newmaps_off` console commands. When the service is started in `localize_only` mode this is automatically disabled. |
 
+## Single-shot localization
+
+A device that needs a one-off position fix (rather than continuous tracking) can use the frame ingest endpoint without running a local camera loop.
+
+Start the service in localization-only mode with `none` as the camera source:
+
+```bash
+./localization_service/localization_service_host \
+    ../Vocabulary/ORBvoc.txt \
+    example.yaml \
+    none \
+    localize_only \
+    0
+```
+
+Then from the device (Python example, requires `opencv-python` and `requests`):
+
+```python
+import time
+import cv2
+import requests
+
+SERVER = "http://localization-host:11142/api/frame"
+session = requests.Session()
+
+def get_pose(frame) -> dict | None:
+    """Submit one frame and return the pose once tracking confirms it."""
+    _, buf = cv2.imencode(".jpg", frame)
+    # Submit the frame; response contains the pose from the previous frame.
+    r = session.post(SERVER, data=buf.tobytes(),
+                     params={"ts": f"{time.monotonic()*1000:.3f}"},
+                     headers={"Content-Type": "image/jpeg"}, timeout=1.0)
+    if r.status_code != 200:
+        return None
+
+    # Poll with an empty body until this frame has been processed.
+    for _ in range(20):
+        r = session.post(SERVER, data=b"", timeout=1.0)
+        data = r.json()
+        if data["tracking_state"] == "OK" and data["pose"]["valid"]:
+            return data["pose"]
+        time.sleep(0.05)
+    return None
+
+cap = cv2.VideoCapture(0)
+ret, frame = cap.read()
+pose = get_pose(frame)
+if pose:
+    print(f"Position: x={pose['x']:.3f}  y={pose['y']:.3f}  z={pose['z']:.3f}")
+```
+
+The empty-body POST is a lightweight pose-only query — it does not submit a frame to the tracker. The poll loop typically converges in 1–3 iterations (50–150 ms) once the system is already localized.
+
+A ready-to-run streaming version that forwards a full camera feed is provided in `tools/send_camera_frames.py`.
+
 ## Project structure
 
 ```
@@ -220,6 +306,7 @@ localization_service/
   include/localization_service/
     config.h                      — port define (11142) and tuning constants
     slam_state.h                  — LifecycleFlags, PoseState
+    ingest_queue.h                — IngestFrame, IngestQueue (frame push API)
     calibration_manager.h         — CalibrationManager
     web_server.h                  — WebServer
   html/
@@ -228,6 +315,7 @@ localization_service/
     calibration.html              — calibration assistant
   tools/
     tello_camera_server.py        — relay server for Tello drone camera
+    send_camera_frames.py         — forward a local camera to the frame ingest API
   example.yaml                    — sample camera configuration
 ```
 

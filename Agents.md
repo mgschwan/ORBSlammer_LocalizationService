@@ -183,8 +183,15 @@ When activated via `SLAM.ActivateLocalizationMode()`:
     - Specifically designed to work with TUM dataset format but with the improved localization logic.
 - **`localization_service/src/localization_service_host.cc`** (built to `localization_service/localization_service_host`):
     - Uses `cv::VideoCapture` to process streams from a URL (e.g., IP camera, MJPEG stream). Now also handles local V4L2 device formats directly (e.g., `/dev/video0`).
+    - Passing `none` as the camera source skips `VideoCapture` entirely; frames are then supplied exclusively via `POST /api/frame`.
     - Acts as an asynchronous Web Interface for manual control over SLAM operations.
     - Features endpoints for REST API Status (`/api/status`) serving JSON variables, action endpoints (`/pause`, `/resume`, `/newmap`, `/switchmap?id=X`), and safely serves static frontend assets (HTML, CSS, JS) directly out of `localization_service/html/`.
+    - Frame ingest endpoint `POST /api/frame`: accepts a raw JPEG body and optional `ts`/IMU query parameters. Returns a JSON response with `queued`, `tracking_state`, and `pose` fields. An empty-body POST skips frame submission and returns the current pose snapshot — used for polling after a frame has been queued.
+
+- **`localization_service/tools/send_camera_frames.py`**:
+    - Forwards frames from a local camera (V4L2, file, or URL) to the frame ingest API.
+    - Displays the pose returned in each POST response inline in the terminal.
+    - Includes `query_pose()` helper and a commented single-shot localization pattern at the bottom of the file.
 
 ### 5. Configuration & Settings
 - **Loop Closing Toggle:** Added support for a `loopClosing` flag in the YAML settings file to enable/disable the Loop Closing thread.
@@ -215,6 +222,50 @@ else if (mState == LOST)
     }
 }
 ```
+
+### Frame Ingest API (`POST /api/frame`)
+
+The frame ingest path allows an external process to push frames into the tracking loop instead of reading from a camera device. The camera source must be `"none"` when launching the service.
+
+**Key types** (`localization_service/include/localization_service/ingest_queue.h`):
+- `IngestFrame` — holds a `cv::Mat image`, `double timestamp` (ms), and optional IMU fields (`hasImu`, `ax/ay/az`, `gx/gy/gz`).
+- `IngestQueue` — thread-safe bounded queue (max depth 2). `push()` returns `false` if full (caller maps this to HTTP 503). `pop()` blocks with a timeout and is called from the main tracking loop when no `VideoCapture` is open.
+
+**Request** — `POST /api/frame`:
+- Body: raw JPEG bytes with `Content-Type: image/jpeg`
+- Empty / `Content-Length: 0` body: pose-only query, no frame submitted
+- Query params: `ts` (ms), `ax`, `ay`, `az`, `gx`, `gy`, `gz`
+
+**Response** — always JSON:
+```json
+{ "queued": true, "tracking_state": "OK",
+  "pose": { "valid": true, "x": 1.2, "y": 0.3, "z": 0.9,
+            "qx": 0, "qy": 0, "qz": 0, "qw": 1 } }
+```
+- `queued: true` — frame was decoded and accepted into the ingest queue
+- `queued: false` — empty-body request; pose snapshot only
+- HTTP 503 — queue full; client should drop the frame and retry
+
+**Single-shot localization pattern** (post one frame, poll until confirmed):
+```python
+# 1. Submit frame — response contains the pose from the *previous* frame.
+r = session.post(url, data=jpeg_bytes, headers={"Content-Type":"image/jpeg"},
+                 params={"ts": f"{time.monotonic()*1000:.3f}"})
+
+# 2. Empty-body poll — wait for this frame to be processed.
+for _ in range(20):
+    r = session.post(url, data=b"")
+    d = r.json()
+    if d["tracking_state"] == "OK" and d["pose"]["valid"]:
+        break
+    time.sleep(0.05)
+```
+
+**Implementation files:**
+- `localization_service/include/localization_service/ingest_queue.h` — types
+- `localization_service/src/ingest_queue.cc` — `push` / `pop` implementation
+- `localization_service/src/web_server.cc` — `routeIngest`, `handleFramePost`, `makePoseJson`
+- `localization_service/src/localization_service_host.cc` — `IngestQueue` creation; main loop branches on `useIngest`
 
 ### Build Requirements
 - OpenCV
